@@ -34,13 +34,19 @@ jobs:
       # --- Build, selon la stack ---
 
       - name: Setup Node
-        if: inputs.project_type == 'node'
+        if: inputs.project_type == 'node' || inputs.project_type == 'static'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Build Node/Next.js
+      - name: Build Node/Next.js (mode serveur)
         if: inputs.project_type == 'node'
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build Next.js (export statique)
+        if: inputs.project_type == 'static'
         run: |
           npm ci
           npm run build
@@ -79,7 +85,14 @@ jobs:
       - name: Ajouter le VPS aux hôtes connus
         run: ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Synchroniser les fichiers vers le VPS
+      - name: Synchroniser un site statique (seul le dossier "out" part sur le VPS)
+        if: inputs.project_type == 'static'
+        run: |
+          rsync -avz --delete \
+            out/ ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ inputs.remote_path }}/
+
+      - name: Synchroniser un projet avec process (tout le repo, sans le superflu)
+        if: inputs.project_type != 'static'
         run: |
           rsync -avz --delete \
             --exclude '.git' \
@@ -93,12 +106,14 @@ jobs:
           ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             "${{ inputs.remote_path }}/venv/bin/pip install -r ${{ inputs.remote_path }}/requirements.txt"
 
-      - name: Redémarrer le service
+      - name: Redémarrer le service (sauf static, qui n'a pas de process)
+        if: inputs.project_type != 'static'
         run: |
           ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             "sudo systemctl restart ${{ inputs.project_name }}"
 
-      - name: Vérifier que le service tourne bien
+      - name: Vérifier que le service tourne bien (sauf static)
+        if: inputs.project_type != 'static'
         run: |
           ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             "systemctl is-active --quiet ${{ inputs.project_name }}"
