@@ -1,0 +1,17 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    uses: ton-compte-github/infra-github-actions/.github/workflows/reusable-deploy.yml@main
+    with:
+      project_name: portfolio
+      project_type: static
+      remote_path: /var/www/portfolio
+    secrets:
+      VPS_HOST: ${{ secrets.VPS_HOST }}
+      VPS_USER: ${{ secrets.VPS_USER }}
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
