@@ -1,0 +1,104 @@
+name: Reusable deploy to VPS
+
+on:
+  workflow_call:
+    inputs:
+      project_name:
+        description: "Nom du projet, doit matcher 'name' dans group_vars/all.yml"
+        required: true
+        type: string
+      project_type:
+        description: "node | python | rust | springboot | static"
+        required: true
+        type: string
+      remote_path:
+        description: "Chemin du projet sur le VPS, ex: /home/lucas/apps/mon-projet"
+        required: true
+        type: string
+    secrets:
+      VPS_HOST:
+        required: true
+      VPS_USER:
+        required: true
+      VPS_SSH_KEY:
+        required: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      # --- Build, selon la stack ---
+
+      - name: Setup Node
+        if: inputs.project_type == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build Node/Next.js
+        if: inputs.project_type == 'node'
+        run: |
+          npm ci
+          npm run build
+
+      - name: Setup Rust
+        if: inputs.project_type == 'rust'
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Build Rust
+        if: inputs.project_type == 'rust'
+        run: cargo build --release
+
+      - name: Setup Java
+        if: inputs.project_type == 'springboot'
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Build Spring Boot
+        if: inputs.project_type == 'springboot'
+        run: ./mvnw clean package -DskipTests=false
+
+      # Python : pas de build, les dépendances sont installées côté VPS
+      # via le venv (voir rôle Ansible app-deploy). Rien à faire ici.
+
+      # --- Déploiement ---
+
+      - name: Ajouter la clé SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Ajouter le VPS aux hôtes connus
+        run: ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Synchroniser les fichiers vers le VPS
+        run: |
+          rsync -avz --delete \
+            --exclude '.git' \
+            --exclude 'node_modules' \
+            --exclude '.env' \
+            ./ ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ inputs.remote_path }}/
+
+      - name: Installer les dépendances Python côté VPS (si applicable)
+        if: inputs.project_type == 'python'
+        run: |
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "${{ inputs.remote_path }}/venv/bin/pip install -r ${{ inputs.remote_path }}/requirements.txt"
+
+      - name: Redémarrer le service
+        run: |
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "sudo systemctl restart ${{ inputs.project_name }}"
+
+      - name: Vérifier que le service tourne bien
+        run: |
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "systemctl is-active --quiet ${{ inputs.project_name }}"
