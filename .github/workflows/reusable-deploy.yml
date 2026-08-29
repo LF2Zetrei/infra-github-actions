@@ -72,8 +72,9 @@ jobs:
         if: inputs.project_type == 'springboot'
         run: ./mvnw clean package -DskipTests=false
 
-      # Python : pas de build, les dépendances sont installées côté VPS
-      # via le venv (voir rôle Ansible app-deploy). Rien à faire ici.
+      # Python : pas de build à proprement parler - le venv et les
+      # dépendances sont créés/installés côté VPS plus bas (voir les étapes
+      # "Créer le venv" et "Installer les dépendances Python").
 
       # --- Déploiement ---
 
@@ -99,6 +100,18 @@ jobs:
             --exclude 'node_modules' \
             --exclude '.env' \
             ./ ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:${{ inputs.remote_path }}/
+
+      - name: Créer le venv Python côté VPS s'il n'existe pas encore (premier déploiement)
+        if: inputs.project_type == 'python'
+        run: |
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "test -d ${{ inputs.remote_path }}/venv || python3 -m venv ${{ inputs.remote_path }}/venv"
+
+      - name: S'assurer que pip est bien présent dans le venv (Debian/Ubuntu l'omettent par défaut)
+        if: inputs.project_type == 'python'
+        run: |
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "${{ inputs.remote_path }}/venv/bin/python3 -m ensurepip --upgrade"
 
       - name: Installer les dépendances Python côté VPS (si applicable)
         if: inputs.project_type == 'python'
