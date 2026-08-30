@@ -34,16 +34,17 @@ jobs:
       # --- Build, selon la stack ---
 
       - name: Setup Node
-        if: inputs.project_type == 'node' || inputs.project_type == 'static'
+        if: inputs.project_type == 'static'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Build Node/Next.js (mode serveur)
-        if: inputs.project_type == 'node'
-        run: |
-          npm ci
-          npm run build
+      # Pour "node" (SSR), le build se fait CÔTÉ VPS, pas ici - voir plus bas.
+      # Builder sur le runner GitHub puis exécuter sur le VPS peut créer des
+      # incompatibilités entre les deux environnements (versions, architecture,
+      # hash de modules Turbopack) - déjà vécu en prod. Un site "static" n'a
+      # pas ce risque (juste des fichiers HTML/JS statiques), donc son build
+      # reste ici, c'est plus rapide.
 
       - name: Build Next.js (export statique)
         if: inputs.project_type == 'static'
@@ -119,11 +120,16 @@ jobs:
           ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             "${{ inputs.remote_path }}/venv/bin/pip install -r ${{ inputs.remote_path }}/requirements.txt"
 
-      - name: Installer les dépendances Node côté VPS (node_modules est exclu du rsync)
+      - name: Installer les dépendances Node ET builder, directement sur le VPS
         if: inputs.project_type == 'node'
         run: |
           ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
-            "cd ${{ inputs.remote_path }} && npm ci --omit=dev"
+            "cd ${{ inputs.remote_path }} && npm ci && npm run build"
+        # npm ci (sans --omit=dev) : le build a besoin des devDependencies
+        # (typescript, @tailwindcss/postcss, etc.). Elles restent sur le VPS
+        # après coup - négligeable en espace disque, et next start n'en a
+        # de toute façon pas besoin pour tourner, elles ne font qu'occuper
+        # de la place sans risque.
 
       - name: Redémarrer le service (sauf static, qui n'a pas de process)
         if: inputs.project_type != 'static'
