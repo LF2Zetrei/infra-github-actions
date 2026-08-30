@@ -119,6 +119,12 @@ jobs:
           ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             "${{ inputs.remote_path }}/venv/bin/pip install -r ${{ inputs.remote_path }}/requirements.txt"
 
+      - name: Installer les dépendances Node côté VPS (node_modules est exclu du rsync)
+        if: inputs.project_type == 'node'
+        run: |
+          ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            "cd ${{ inputs.remote_path }} && npm ci --omit=dev"
+
       - name: Redémarrer le service (sauf static, qui n'a pas de process)
         if: inputs.project_type != 'static'
         run: |
